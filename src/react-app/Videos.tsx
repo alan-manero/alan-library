@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VideoRecord } from "./ImageDetail";
-import { captureVideoPoster, imageBrightness } from "./lib/media";
+import { captureVideoPoster, imageLooksBlack } from "./lib/media";
 
 interface LibraryVideo extends VideoRecord {
   parent_image_id: string;
@@ -76,8 +76,7 @@ export function Videos({
           if (video.thumbnail_key) {
             const res = await fetch(`/api/media/${video.thumbnail_key}`);
             if (!res.ok) continue;
-            const brightness = await imageBrightness(await res.blob());
-            if (brightness >= 18) continue; // thumbnail is fine
+            if (!(await imageLooksBlack(await res.blob()))) continue;
           }
           const poster = await captureVideoPoster(
             `/api/media/${video.storage_key}`

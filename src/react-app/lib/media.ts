@@ -71,8 +71,18 @@ export interface VideoPoster {
   height: number;
 }
 
-// Average pixel luminance (0-255) below which a frame counts as "black".
-const FRAME_BRIGHTNESS_OK = 18;
+interface FrameStats {
+  /** Average pixel luminance, 0-255. */
+  brightness: number;
+  /** Standard deviation of luminance — near zero for uniform black frames. */
+  contrast: number;
+}
+
+// A frame counts as "black" only when it is both dark AND flat. Real night
+// scenes are dark but have contrast (lights, highlights), so they pass.
+function looksBlack(stats: FrameStats): boolean {
+  return stats.brightness < 32 && stats.contrast < 22;
+}
 
 function waitFor(
   target: HTMLMediaElement,
@@ -102,30 +112,37 @@ function waitFor(
   });
 }
 
-function sourceBrightness(
+function sourceStats(
   source: CanvasImageSource,
   sourceWidth: number,
   sourceHeight: number
-): number {
+): FrameStats {
   const sample = document.createElement("canvas");
   sample.width = 32;
   sample.height = 18;
   const context = sample.getContext("2d");
-  if (!context) return 255;
+  if (!context) return { brightness: 255, contrast: 255 };
   context.drawImage(source, 0, 0, sourceWidth, sourceHeight, 0, 0, 32, 18);
   const { data } = context.getImageData(0, 0, 32, 18);
+  const count = data.length / 4;
   let sum = 0;
   for (let i = 0; i < data.length; i += 4) {
     sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
   }
-  return sum / (data.length / 4);
+  const mean = sum / count;
+  let variance = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const luma = (data[i] + data[i + 1] + data[i + 2]) / 3;
+    variance += (luma - mean) * (luma - mean);
+  }
+  return { brightness: mean, contrast: Math.sqrt(variance / count) };
 }
 
-/** Average luminance (0-255) of an encoded image, e.g. a stored thumbnail. */
-export async function imageBrightness(blob: Blob): Promise<number> {
+/** True when a stored thumbnail is essentially a black frame. */
+export async function imageLooksBlack(blob: Blob): Promise<boolean> {
   const bitmap = await createImageBitmap(blob);
   try {
-    return sourceBrightness(bitmap, bitmap.width, bitmap.height);
+    return looksBlack(sourceStats(bitmap, bitmap.width, bitmap.height));
   } finally {
     bitmap.close();
   }
@@ -133,7 +150,7 @@ export async function imageBrightness(blob: Blob): Promise<number> {
 
 async function grabFrame(
   video: HTMLVideoElement
-): Promise<{ blob: Blob; brightness: number } | null> {
+): Promise<{ blob: Blob; stats: FrameStats } | null> {
   try {
     const scale = Math.min(
       1,
@@ -145,11 +162,11 @@ async function grabFrame(
     const context = canvas.getContext("2d");
     if (!context) return null;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const brightness = sourceBrightness(canvas, canvas.width, canvas.height);
+    const stats = sourceStats(canvas, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/webp", 0.8)
     );
-    return blob ? { blob, brightness } : null;
+    return blob ? { blob, stats } : null;
   } catch {
     return null;
   }
@@ -175,22 +192,29 @@ export async function captureVideoPoster(
   const duration =
     Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 0;
   const d = duration || 1;
-  const candidates = [d * 0.2, d * 0.45, d * 0.7].map((t) =>
-    Math.min(Math.max(t, 0.1), Math.max(d - 0.05, 0.1))
+  const candidates = [0.3, 0.5, 0.7, 0.15, 0.85].map((fraction) =>
+    Math.min(Math.max(d * fraction, 0.1), Math.max(d - 0.05, 0.1))
   );
 
   const width = video.videoWidth;
   const height = video.videoHeight;
 
-  let best: { blob: Blob; brightness: number } | null = null;
+  let best: { blob: Blob; stats: FrameStats } | null = null;
   for (const time of candidates) {
     video.currentTime = time;
     const seeked = await waitFor(video, "seeked", 5000);
     if (!seeked) continue;
+    // Give the decoder a moment to actually paint the seeked frame;
+    // capturing immediately after "seeked" can still yield a black canvas.
+    await new Promise((resolve) => setTimeout(resolve, 80));
     const shot = await grabFrame(video);
     if (!shot) continue;
-    if (!best || shot.brightness > best.brightness) best = shot;
-    if (shot.brightness >= FRAME_BRIGHTNESS_OK) break;
+    const score = shot.stats.brightness + shot.stats.contrast;
+    const bestScore = best
+      ? best.stats.brightness + best.stats.contrast
+      : -1;
+    if (score > bestScore) best = shot;
+    if (!looksBlack(shot.stats)) break;
   }
   video.removeAttribute("src");
   video.load();
