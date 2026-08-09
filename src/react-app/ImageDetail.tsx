@@ -92,6 +92,8 @@ export function ImageDetail({
   const [busy, setBusy] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<VideoRecord | null>(null);
   const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
+  const [videoDragActive, setVideoDragActive] = useState(false);
+  const videoDragDepth = useRef(0);
   const [videoUpload, setVideoUpload] = useState<{
     name: string;
     percent: number;
@@ -341,6 +343,18 @@ export function ImageDetail({
       <div
         className="detail-panel"
         onClick={(e) => e.stopPropagation()}
+        onDragEnter={(e) => {
+          if (!e.dataTransfer?.types.includes("Files")) return;
+          e.preventDefault();
+          e.stopPropagation();
+          videoDragDepth.current++;
+          setVideoDragActive(true);
+        }}
+        onDragLeave={(e) => {
+          e.stopPropagation();
+          videoDragDepth.current = Math.max(0, videoDragDepth.current - 1);
+          if (videoDragDepth.current === 0) setVideoDragActive(false);
+        }}
         onDragOver={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -348,6 +362,8 @@ export function ImageDetail({
         onDrop={(e) => {
           e.preventDefault();
           e.stopPropagation();
+          videoDragDepth.current = 0;
+          setVideoDragActive(false);
           if (e.dataTransfer?.files?.length) {
             handleVideoFiles(e.dataTransfer.files);
           }
@@ -592,8 +608,8 @@ export function ImageDetail({
 
             {data.videos.length === 0 && !videoUpload && (
               <p className="muted small-note">
-                None yet. Click "+ Add video" or drag an MP4 anywhere onto this
-                panel.
+                None yet. Click "+ Add video" or drop one or more video files
+                anywhere on this panel.
               </p>
             )}
 
@@ -749,6 +765,14 @@ export function ImageDetail({
           )}
         </div>
       </div>
+
+      {videoDragActive && (
+        <div className="video-drop-overlay">
+          <div className="drop-overlay-inner">
+            Drop videos to add them to this image
+          </div>
+        </div>
+      )}
 
       {playingVideo && (
         <div
