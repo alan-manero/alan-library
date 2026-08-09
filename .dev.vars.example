@@ -1,0 +1,12 @@
+# Copy this file to `.dev.vars` (same folder) and fill in real values.
+# `.dev.vars` is used ONLY for local development and is ignored by Git.
+# DO NOT COMMIT a file containing real values.
+
+# The password you type on the login screen.
+APP_PASSWORD=
+
+# A long random string used to sign login cookies. Any random ~40 characters.
+APP_AUTH_SECRET=
+
+# Your Anthropic API key (needed from Phase 4 onward, leave empty for now).
+ANTHROPIC_API_KEY=

@@ -1,0 +1,34 @@
+// Cloudflare configuration for Alan Library.
+// This file is safe to commit: it contains NO secrets.
+// Secrets (passwords, API keys) are stored with `wrangler secret put` (production)
+// and in the .dev.vars file (local development, never committed).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "alan-library",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  },
+  // D1 = the SQL database that stores all metadata (image records, tags, videos...).
+  // After running `npx wrangler d1 create alan-library-db`, paste the real
+  // database_id below (replacing the placeholder).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "alan-library-db",
+      "database_id": "6efdca52-40ac-457e-8b45-2680c2b6fd55",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // R2 = the file storage bucket that permanently holds images, videos and thumbnails.
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "alan-library-media"
+    }
+  ]
+}
