@@ -1053,6 +1053,13 @@ button:disabled {
   font-weight: 500;
 }
 
+.meta-cell input {
+  padding: 0.42rem 0.7rem;
+  font-size: 0.88rem;
+  border-radius: 10px;
+  width: 100%;
+}
+
 /* Tag pills — pastel color per category */
 
 .pill-row {

@@ -221,25 +221,105 @@ imagesApp.get("/images/:id", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Edit the description. Marks it as manually edited so AI reprocessing
-// never overwrites your correction (spec 14).
+// Edit the description and/or the metadata fields (character, location...).
+// The description is marked as manually edited so AI reprocessing never
+// overwrites the correction (spec 14). Metadata edits also sync the tags of
+// the matching category, so filters stay truthful (Alan -> Mia moves the
+// image from the Alan filter to the Mia filter).
 // ---------------------------------------------------------------------------
+
+// Image columns editable from the Details grid, and the tag category each
+// one feeds. Values can hold several comma-separated entries (e.g. mood
+// "Focused, Calm"), matching how AI analysis stores them.
+const EDITABLE_FIELDS: Record<string, string> = {
+  character: "CHARACTER",
+  location: "LOCATION",
+  mood: "MOOD",
+  time_of_day: "TIME",
+  shot_type: "SHOT_TYPE",
+  camera_angle: "CAMERA_ANGLE",
+  pose: "POSE",
+};
 
 imagesApp.patch("/images/:id", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<{ description?: string }>().catch(() => null);
-  if (!body || typeof body.description !== "string") {
+  const body = await c.req
+    .json<Record<string, unknown>>()
+    .catch(() => null);
+  if (!body || typeof body !== "object") {
     return c.json({ error: "Nothing to update." }, 400);
   }
 
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  const tagSync: Array<{ category: string; value: string | null }> = [];
+
+  if (typeof body.description === "string") {
+    sets.push("description = ?", "description_edited = 1");
+    binds.push(body.description.trim().slice(0, 1000));
+  }
+
+  for (const [field, category] of Object.entries(EDITABLE_FIELDS)) {
+    const raw = body[field];
+    if (raw === undefined) continue;
+    const value =
+      typeof raw === "string" && raw.trim()
+        ? raw.trim().slice(0, 120)
+        : null;
+    sets.push(`${field} = ?`);
+    binds.push(value);
+    tagSync.push({ category, value });
+  }
+
+  if (sets.length === 0) {
+    return c.json({ error: "Nothing to update." }, 400);
+  }
+
+  // "description_edited = 1" carries no bind parameter.
   const result = await c.env.DB.prepare(
-    `UPDATE images SET description = ?2, description_edited = 1,
-            updated_at = datetime('now')
-      WHERE id = ?1`
+    `UPDATE images SET ${sets.join(", ")}, updated_at = datetime('now')
+      WHERE id = ?`
   )
-    .bind(id, body.description.trim().slice(0, 1000))
+    .bind(...binds, id)
     .run();
   if (result.meta.changes === 0) return c.json({ error: "Image not found." }, 404);
+
+  // Rebuild this image's tags for every edited category.
+  for (const { category, value } of tagSync) {
+    await c.env.DB.prepare(
+      `DELETE FROM image_tags
+        WHERE image_id = ?1
+          AND tag_id IN (SELECT id FROM tags WHERE category = ?2)`
+    )
+      .bind(id, category)
+      .run();
+
+    const parts = (value ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    for (const name of parts) {
+      let tag = await c.env.DB.prepare(
+        "SELECT id FROM tags WHERE lower(canonical_name) = lower(?1) AND category = ?2"
+      )
+        .bind(name, category)
+        .first<{ id: number }>();
+      if (!tag) {
+        const inserted = await c.env.DB.prepare(
+          "INSERT INTO tags (canonical_name, category) VALUES (?1, ?2)"
+        )
+          .bind(name, category)
+          .run();
+        tag = { id: Number(inserted.meta.last_row_id) };
+      }
+      await c.env.DB.prepare(
+        "INSERT OR IGNORE INTO image_tags (image_id, tag_id, source) VALUES (?1, ?2, 'USER')"
+      )
+        .bind(id, tag.id)
+        .run();
+    }
+  }
+
   return c.json({ ok: true });
 });
 

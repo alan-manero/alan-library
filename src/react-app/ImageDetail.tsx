@@ -49,6 +49,18 @@ interface DetailData {
   videos: VideoRecord[];
 }
 
+const DETAIL_FIELDS = [
+  { key: "character", label: "Character", category: "CHARACTER" },
+  { key: "location", label: "Location", category: "LOCATION" },
+  { key: "mood", label: "Mood", category: "MOOD" },
+  { key: "time_of_day", label: "Time of day", category: "TIME" },
+  { key: "shot_type", label: "Shot type", category: "SHOT_TYPE" },
+  { key: "camera_angle", label: "Camera angle", category: "CAMERA_ANGLE" },
+  { key: "pose", label: "Pose", category: "POSE" },
+] as const;
+
+type DetailFieldKey = (typeof DETAIL_FIELDS)[number]["key"];
+
 const ADDABLE_CATEGORIES: Array<{ value: string; label: string }> = [
   { value: "PROJECT", label: "Project tag" },
   { value: "CHARACTER", label: "Character" },
@@ -239,6 +251,18 @@ export function ImageDetail({
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [newTagCategory, setNewTagCategory] = useState("PROJECT");
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [detailsDraft, setDetailsDraft] = useState<
+    Record<DetailFieldKey, string>
+  >({
+    character: "",
+    location: "",
+    mood: "",
+    time_of_day: "",
+    shot_type: "",
+    camera_angle: "",
+    pose: "",
+  });
   const [busy, setBusy] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<VideoRecord | null>(null);
   const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
@@ -286,6 +310,7 @@ export function ImageDetail({
   // one loads, so the panel doesn't flash or re-animate.
   useEffect(() => {
     setEditingDescription(false);
+    setEditingDetails(false);
     setQuickAddOpen(false);
     setPlayingVideo(null);
     setPreviewVideoId(null);
@@ -375,6 +400,31 @@ export function ImageDetail({
       body: JSON.stringify({ description: descriptionDraft }),
     });
     setEditingDescription(false);
+    await refreshAndNotify();
+    setBusy(false);
+  }
+
+  function startEditDetails() {
+    setDetailsDraft({
+      character: image.character ?? "",
+      location: image.location ?? "",
+      mood: image.mood ?? "",
+      time_of_day: image.time_of_day ?? "",
+      shot_type: image.shot_type ?? "",
+      camera_angle: image.camera_angle ?? "",
+      pose: image.pose ?? "",
+    });
+    setEditingDetails(true);
+  }
+
+  async function saveDetails() {
+    setBusy(true);
+    await fetch(`/api/images/${imageId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(detailsDraft),
+    });
+    setEditingDetails(false);
     await refreshAndNotify();
     setBusy(false);
   }
@@ -673,15 +723,72 @@ export function ImageDetail({
           </section>
 
           <section>
-            <h3 className="section-title">Details</h3>
-            <div className="meta-grid">
-              {metadataCells.map(([label, value]) => (
-                <div key={label} className="meta-cell">
-                  <span className="meta-label">{label}</span>
-                  <span className="meta-value">{value ?? "—"}</span>
-                </div>
-              ))}
+            <div className="section-header">
+              <h3 className="section-title">Details</h3>
+              {!editingDetails && (
+                <button
+                  className="ghost-button small"
+                  onClick={startEditDetails}
+                >
+                  Edit
+                </button>
+              )}
             </div>
+            {editingDetails ? (
+              <>
+                <div className="meta-grid">
+                  {DETAIL_FIELDS.map((field) => (
+                    <label key={field.key} className="meta-cell">
+                      <span className="meta-label">{field.label}</span>
+                      <input
+                        type="text"
+                        value={detailsDraft[field.key]}
+                        placeholder="—"
+                        list={`detail-options-${field.category}`}
+                        onChange={(e) =>
+                          setDetailsDraft((draft) => ({
+                            ...draft,
+                            [field.key]: e.target.value,
+                          }))
+                        }
+                      />
+                      <datalist id={`detail-options-${field.category}`}>
+                        {allTags
+                          .filter((t) => t.category === field.category)
+                          .map((t) => (
+                            <option key={t.id} value={t.canonical_name} />
+                          ))}
+                      </datalist>
+                    </label>
+                  ))}
+                </div>
+                <div className="button-row">
+                  <button disabled={busy} onClick={saveDetails}>
+                    Save
+                  </button>
+                  <button
+                    className="ghost-button"
+                    onClick={() => setEditingDetails(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p className="muted small-note">
+                  Leave a field empty to clear it. Several values are allowed,
+                  separated by commas (e.g. "Focused, Calm"). Filters follow
+                  your corrections.
+                </p>
+              </>
+            ) : (
+              <div className="meta-grid">
+                {metadataCells.map(([label, value]) => (
+                  <div key={label} className="meta-cell">
+                    <span className="meta-label">{label}</span>
+                    <span className="meta-value">{value ?? "—"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section>
