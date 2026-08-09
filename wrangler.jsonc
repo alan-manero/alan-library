@@ -8,7 +8,10 @@
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-07-01",
   "assets": {
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // API routes (including file downloads opened as page navigations) must
+    // always reach the Worker instead of the single-page-app HTML fallback.
+    "run_worker_first": ["/api/*"]
   },
   "observability": {
     "enabled": true
