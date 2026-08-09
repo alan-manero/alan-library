@@ -521,11 +521,12 @@ export function ImageDetail({
           </section>
 
           <section>
-            <h3 className="section-title">Project tags</h3>
+            <h3 className="section-title">Your tags</h3>
             <div className="pill-row">
               {projectTags.length === 0 && (
                 <span className="muted small-note">
-                  Your own labels — e.g. "Streamer Alan", "Negative moments".
+                  Your own labels — e.g. "Streamer Alan". They work in search
+                  and filters exactly like AI tags.
                 </span>
               )}
               {projectTags.map((t) => (

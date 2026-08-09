@@ -14,6 +14,54 @@ const MAX_VIDEO_BYTES = 95 * 1024 * 1024;
 
 export const videosApp = new Hono<{ Bindings: Env }>();
 
+// ---------------------------------------------------------------------------
+// All videos in the library (for the Videos page), newest first.
+//   ?q=...            free text across title/filename/model/prompt/notes
+//                     and the parent image's filename/description
+//   ?limit / ?offset  pagination
+// ---------------------------------------------------------------------------
+
+videosApp.get("/videos", async (c) => {
+  const limit = Math.min(Number(c.req.query("limit")) || 48, 200);
+  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+  const q = (c.req.query("q") ?? "").trim();
+
+  const where: string[] = ["v.archived = 0"];
+  const binds: unknown[] = [];
+  for (const word of q.split(/\s+/).filter(Boolean).slice(0, 8)) {
+    const like = `%${word}%`;
+    where.push(
+      `(v.title LIKE ? OR v.original_filename LIKE ? OR v.model LIKE ?
+        OR v.prompt LIKE ? OR v.notes LIKE ?
+        OR i.original_filename LIKE ? OR i.description LIKE ?)`
+    );
+    binds.push(like, like, like, like, like, like, like);
+  }
+  const whereSql = where.join(" AND ");
+
+  const [rows, count] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT v.*, i.original_filename AS image_filename,
+              i.thumbnail_key AS image_thumbnail_key
+         FROM videos v JOIN images i ON i.id = v.parent_image_id
+        WHERE ${whereSql}
+        ORDER BY v.created_at DESC, v.id DESC
+        LIMIT ? OFFSET ?`
+    )
+      .bind(...binds, limit, offset)
+      .all(),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS total
+         FROM videos v JOIN images i ON i.id = v.parent_image_id
+        WHERE ${whereSql}`
+    )
+      .bind(...binds)
+      .first<{ total: number }>(),
+  ]);
+
+  return c.json({ videos: rows.results, total: count?.total ?? 0 });
+});
+
 videosApp.post("/videos", async (c) => {
   const form = await c.req.formData().catch(() => null);
   if (!form) return c.json({ error: "Invalid upload request." }, 400);

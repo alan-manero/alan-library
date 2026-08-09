@@ -53,6 +53,7 @@ const FILTER_CATEGORIES: Array<{ category: string; label: string }> = [
   { category: "TIME", label: "Time" },
   { category: "SHOT_TYPE", label: "Shot type" },
   { category: "OBJECT", label: "Object" },
+  { category: "PROJECT", label: "My tags" },
 ];
 
 const PAGE_SIZE = 60;
@@ -61,7 +62,15 @@ const ANALYSIS_CONCURRENCY = 2;
 
 let uploadKeyCounter = 0;
 
-export function Library() {
+export function Library({
+  hidden = false,
+  openImageId = null,
+  onOpenImageHandled,
+}: {
+  hidden?: boolean;
+  openImageId?: string | null;
+  onOpenImageHandled?: () => void;
+}) {
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -82,6 +91,20 @@ export function Library() {
   useEffect(() => {
     detailOpenRef.current = selectedImageId !== null;
   }, [selectedImageId]);
+
+  // While another page (Videos) is shown, ignore window-level image drops.
+  const hiddenRef = useRef(hidden);
+  useEffect(() => {
+    hiddenRef.current = hidden;
+  }, [hidden]);
+
+  // "Source image" on the Videos page jumps here with an image to open.
+  useEffect(() => {
+    if (openImageId) {
+      setSelectedImageId(openImageId);
+      onOpenImageHandled?.();
+    }
+  }, [openImageId, onOpenImageHandled]);
 
   // Warm the browser cache for the neighbours of the open image, so
   // prev/next navigation in the detail view feels instant.
@@ -440,7 +463,7 @@ export function Library() {
   // Window-level drag & drop
   useEffect(() => {
     function onDragEnter(e: DragEvent) {
-      if (detailOpenRef.current) return;
+      if (detailOpenRef.current || hiddenRef.current) return;
       if (!e.dataTransfer?.types.includes("Files")) return;
       dragDepth.current++;
       setDragActive(true);
@@ -456,7 +479,7 @@ export function Library() {
       e.preventDefault();
       dragDepth.current = 0;
       setDragActive(false);
-      if (detailOpenRef.current) return;
+      if (detailOpenRef.current || hiddenRef.current) return;
       if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
     }
     window.addEventListener("dragenter", onDragEnter);
