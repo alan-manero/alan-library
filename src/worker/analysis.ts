@@ -22,8 +22,10 @@ const analysisSchema = z.object({
 
 type Analysis = z.infer<typeof analysisSchema>;
 
-// Cheapest Claude model with vision — analysis costs well under 1 cent per image.
-const CLAUDE_MODEL = "claude-haiku-4-5";
+// Sonnet-class model: much stronger scene understanding than Haiku for
+// roughly a cent per image (the API downscales images internally, so even
+// full-resolution originals stay cheap).
+const CLAUDE_MODEL = "claude-sonnet-5";
 
 interface Tag {
   id: number;
@@ -344,10 +346,16 @@ analysisApp.post("/images/:id/analyze", async (c) => {
   ]);
 
   try {
-    // Analyze the small thumbnail, not the original: faster, cheaper, and
-    // safely under Claude's 5 MB image limit.
-    const key = image.thumbnail_key ?? image.storage_key;
-    const object = await c.env.MEDIA.get(key);
+    // Analyze the full-resolution original whenever it fits the API's 5 MB
+    // image limit — small details (props, faces, backgrounds) are lost on
+    // the 500px thumbnail. Fall back to the thumbnail for oversized files.
+    let object = await c.env.MEDIA.get(image.storage_key);
+    if (
+      (!object || object.size > 4.5 * 1024 * 1024) &&
+      image.thumbnail_key
+    ) {
+      object = await c.env.MEDIA.get(image.thumbnail_key);
+    }
     if (!object) throw new Error("Stored file is missing from R2.");
 
     const bytes = new Uint8Array(await object.arrayBuffer());
