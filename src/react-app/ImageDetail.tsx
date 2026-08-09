@@ -66,6 +66,156 @@ function formatDuration(seconds: number | null): string {
   return minutes > 0 ? `${minutes}:${String(secs).padStart(2, "0")}` : `${secs}s`;
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  PROJECT: "My tag",
+  CHARACTER: "Character",
+  ACTIVITY: "Activity",
+  LOCATION: "Location",
+  MOOD: "Mood",
+  TIME: "Time",
+  SHOT_TYPE: "Shot type",
+  CAMERA_ANGLE: "Camera angle",
+  POSE: "Pose",
+  OBJECT: "Object",
+  VISUAL: "Visual",
+};
+
+/**
+ * Tag input with live suggestions from the existing tag list, so the same
+ * concept never gets created twice under slightly different names.
+ * Picking a suggestion reuses that exact tag (and its category); a brand-new
+ * name is only created when nothing matches.
+ */
+function TagSuggestInput({
+  allTags,
+  category,
+  createCategory,
+  placeholder,
+  autoFocus,
+  onAdd,
+  onDismiss,
+}: {
+  allTags: TagRecord[];
+  /** Restrict suggestions to one category (undefined = all categories). */
+  category?: string;
+  /** Category used when creating a tag that doesn't exist yet. */
+  createCategory: string;
+  placeholder: string;
+  autoFocus?: boolean;
+  onAdd: (name: string, category: string) => void | Promise<void>;
+  /** Called when the field is dismissed while empty (Escape / click away). */
+  onDismiss?: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+
+  const q = text.trim().toLowerCase();
+  const matches = q
+    ? allTags
+        .filter((t) => !category || t.category === category)
+        .filter((t) => t.canonical_name.toLowerCase().includes(q))
+        .sort((a, b) => b.usage_count - a.usage_count)
+        .slice(0, 8)
+    : [];
+  const hasExact = matches.some((t) => t.canonical_name.toLowerCase() === q);
+
+  const options: Array<{
+    name: string;
+    category: string;
+    count: number;
+    isNew: boolean;
+  }> = [
+    ...matches.map((t) => ({
+      name: t.canonical_name,
+      category: t.category,
+      count: t.usage_count,
+      isNew: false,
+    })),
+    ...(q && !hasExact
+      ? [{ name: text.trim(), category: createCategory, count: 0, isNew: true }]
+      : []),
+  ];
+  const active = Math.min(highlight, Math.max(0, options.length - 1));
+
+  async function pick(option: (typeof options)[number]) {
+    await onAdd(option.name, option.category);
+    setText("");
+    setHighlight(0);
+  }
+
+  return (
+    <div className="tag-suggest">
+      <input
+        type="text"
+        value={text}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          if (!text.trim()) onDismiss?.();
+        }}
+        onChange={(e) => {
+          setText(e.target.value);
+          setHighlight(0);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            if (text) {
+              setText("");
+            } else {
+              onDismiss?.();
+            }
+            return;
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlight((h) => Math.min(h + 1, options.length - 1));
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((h) => Math.max(h - 1, 0));
+          }
+          if (e.key === "Enter" && options.length > 0) {
+            e.preventDefault();
+            pick(options[active]);
+          }
+        }}
+      />
+      {focused && options.length > 0 && (
+        <div className="tag-suggest-menu">
+          {options.map((option, i) => (
+            <button
+              key={`${option.category}:${option.name}:${option.isNew}`}
+              className={`tag-suggest-option ${i === active ? "active" : ""} ${option.isNew ? "create" : ""}`}
+              onMouseDown={(e) => {
+                // mousedown (not click) so the input doesn't blur first
+                e.preventDefault();
+                pick(option);
+              }}
+              onMouseEnter={() => setHighlight(i)}
+            >
+              {option.isNew ? (
+                <span>Create "{option.name}"</span>
+              ) : (
+                <span>{option.name}</span>
+              )}
+              <span className="tag-suggest-meta">
+                {CATEGORY_LABELS[option.category] ?? option.category}
+                {option.count > 0
+                  ? ` · ${option.count} image${option.count === 1 ? "" : "s"}`
+                  : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ImageDetail({
   imageId,
   allTags,
@@ -87,8 +237,8 @@ export function ImageDetail({
   const [error, setError] = useState<string | null>(null);
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
-  const [newTagName, setNewTagName] = useState("");
   const [newTagCategory, setNewTagCategory] = useState("PROJECT");
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [playingVideo, setPlayingVideo] = useState<VideoRecord | null>(null);
   const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
@@ -136,7 +286,7 @@ export function ImageDetail({
   // one loads, so the panel doesn't flash or re-animate.
   useEffect(() => {
     setEditingDescription(false);
-    setNewTagName("");
+    setQuickAddOpen(false);
     setPlayingVideo(null);
     setPreviewVideoId(null);
     setEditingVideoId(null);
@@ -229,19 +379,18 @@ export function ImageDetail({
     setBusy(false);
   }
 
-  async function addTag() {
-    const name = newTagName.trim();
-    if (!name) return;
+  async function addTag(name: string, category: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
     setBusy(true);
     const res = await fetch(`/api/images/${imageId}/tags`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, category: newTagCategory }),
+      body: JSON.stringify({ name: trimmed, category }),
     });
     if (res.ok) {
       const { tags: updated } = await res.json<{ tags: ImageTag[] }>();
       setData((prev) => (prev ? { ...prev, tags: updated } : prev));
-      setNewTagName("");
     }
     setBusy(false);
   }
@@ -490,9 +639,6 @@ export function ImageDetail({
           <section>
             <h3 className="section-title">Tags</h3>
             <div className="pill-row">
-              {aiTags.length === 0 && (
-                <span className="muted small-note">No AI tags yet.</span>
-              )}
               {aiTags.map((t) => (
                 <span key={t.id} className={`pill cat-${t.category}`}>
                   {t.canonical_name}
@@ -505,7 +651,25 @@ export function ImageDetail({
                   </button>
                 </span>
               ))}
+              {!quickAddOpen && (
+                <button
+                  className="pill-add"
+                  onClick={() => setQuickAddOpen(true)}
+                >
+                  + Add tag
+                </button>
+              )}
             </div>
+            {quickAddOpen && (
+              <TagSuggestInput
+                allTags={allTags}
+                createCategory="VISUAL"
+                placeholder="Type to search existing tags…"
+                autoFocus
+                onAdd={addTag}
+                onDismiss={() => setQuickAddOpen(false)}
+              />
+            )}
           </section>
 
           <section>
@@ -553,23 +717,13 @@ export function ImageDetail({
                   </option>
                 ))}
               </select>
-              <input
-                type="text"
-                placeholder="Add tag and press Enter"
-                value={newTagName}
-                list="tag-suggestions"
-                onChange={(e) => setNewTagName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") addTag();
-                }}
+              <TagSuggestInput
+                allTags={allTags}
+                category={newTagCategory}
+                createCategory={newTagCategory}
+                placeholder="Add tag — type to search"
+                onAdd={addTag}
               />
-              <datalist id="tag-suggestions">
-                {allTags
-                  .filter((t) => t.category === newTagCategory)
-                  .map((t) => (
-                    <option key={t.id} value={t.canonical_name} />
-                  ))}
-              </datalist>
             </div>
           </section>
 

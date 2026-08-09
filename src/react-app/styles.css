@@ -1150,6 +1150,96 @@ button:disabled {
   font-size: 0.82rem;
 }
 
+/* "+ Add tag" chip at the end of the tag row */
+
+.pill-add {
+  background: transparent;
+  border: 1.5px dashed var(--border-strong);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.79rem;
+  padding: 0.28rem 0.8rem;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+.pill-add:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--ink);
+  transform: none;
+  box-shadow: none;
+}
+
+/* Tag input with live suggestions */
+
+.tag-suggest {
+  position: relative;
+  flex: 1;
+  max-width: 360px;
+}
+
+.tag-suggest input {
+  width: 100%;
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.88rem;
+}
+
+.tag-suggest-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: rise-in 0.15s var(--ease);
+}
+
+.tag-suggest-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  color: var(--text);
+  font-weight: 500;
+  font-size: 0.84rem;
+  text-align: left;
+  padding: 0.45rem 0.75rem;
+  box-shadow: none;
+}
+
+.tag-suggest-option:hover:not(:disabled),
+.tag-suggest-option.active {
+  background: var(--accent-soft);
+  color: var(--text);
+  transform: none;
+  box-shadow: none;
+}
+
+.tag-suggest-option.create {
+  color: #3d56a6;
+  font-weight: 600;
+}
+
+.tag-suggest-meta {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 400;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .add-tag-row {
   display: flex;
   gap: 0.5rem;
