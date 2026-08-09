@@ -137,6 +137,46 @@ videosApp.post("/videos", async (c) => {
   return c.json({ video }, 201);
 });
 
+// Replace a video's thumbnail (used to repair black poster frames captured
+// from fade-in videos). The key is versioned because media responses are
+// cached as immutable in the browser.
+videosApp.put("/videos/:id/thumbnail", async (c) => {
+  const id = c.req.param("id");
+  const form = await c.req.formData().catch(() => null);
+  const thumbnail = form?.get("thumbnail");
+  if (!(thumbnail instanceof File) || thumbnail.size === 0) {
+    return c.json({ error: "No thumbnail received." }, 400);
+  }
+  if (thumbnail.size > 2 * 1024 * 1024) {
+    return c.json({ error: "Thumbnail is too large." }, 400);
+  }
+
+  const video = await c.env.DB.prepare(
+    "SELECT thumbnail_key FROM videos WHERE id = ?1"
+  )
+    .bind(id)
+    .first<{ thumbnail_key: string | null }>();
+  if (!video) return c.json({ error: "Video not found." }, 404);
+
+  const newKey = `videos/thumbnails/${id}-${Date.now()}.webp`;
+  await c.env.MEDIA.put(newKey, thumbnail.stream(), {
+    httpMetadata: { contentType: "image/webp" },
+  });
+  await c.env.DB.prepare(
+    "UPDATE videos SET thumbnail_key = ?2 WHERE id = ?1"
+  )
+    .bind(id, newKey)
+    .run();
+  if (video.thumbnail_key && video.thumbnail_key !== newKey) {
+    await c.env.MEDIA.delete(video.thumbnail_key);
+  }
+
+  const updated = await c.env.DB.prepare("SELECT * FROM videos WHERE id = ?1")
+    .bind(id)
+    .first();
+  return c.json({ video: updated });
+});
+
 // Edit video metadata (title, generation model, prompt, notes).
 videosApp.patch("/videos/:id", async (c) => {
   const id = c.req.param("id");

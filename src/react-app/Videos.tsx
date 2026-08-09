@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { VideoRecord } from "./ImageDetail";
+import { captureVideoPoster, imageBrightness } from "./lib/media";
 
 interface LibraryVideo extends VideoRecord {
   parent_image_id: string;
@@ -59,6 +60,54 @@ export function Videos({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Background repair: older uploads captured their poster frame at the very
+  // start of the video, which is often black (fade-ins). Check each loaded
+  // video's thumbnail once and re-capture a brighter frame when needed.
+  const repairCheckedRef = useRef(new Set<string>());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const video of videos) {
+        if (cancelled) return;
+        if (repairCheckedRef.current.has(video.id)) continue;
+        repairCheckedRef.current.add(video.id);
+        try {
+          if (video.thumbnail_key) {
+            const res = await fetch(`/api/media/${video.thumbnail_key}`);
+            if (!res.ok) continue;
+            const brightness = await imageBrightness(await res.blob());
+            if (brightness >= 18) continue; // thumbnail is fine
+          }
+          const poster = await captureVideoPoster(
+            `/api/media/${video.storage_key}`
+          );
+          if (!poster || cancelled) continue;
+          const form = new FormData();
+          form.append("thumbnail", poster.blob, "thumbnail.webp");
+          const up = await fetch(`/api/videos/${video.id}/thumbnail`, {
+            method: "PUT",
+            body: form,
+          });
+          if (!up.ok) continue;
+          const data = await up.json<{ video: { thumbnail_key: string } }>();
+          if (cancelled) return;
+          setVideos((prev) =>
+            prev.map((v) =>
+              v.id === video.id
+                ? { ...v, thumbnail_key: data.video.thumbnail_key }
+                : v
+            )
+          );
+        } catch {
+          // Repair is best-effort; a failure just keeps the old thumbnail.
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [videos]);
 
   return (
     <div className="library">
