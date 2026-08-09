@@ -109,13 +109,20 @@ export function ImageDetail({
   });
   const videoInputRef = useRef<HTMLInputElement>(null);
 
+  // The component stays mounted while navigating between images, so
+  // responses that arrive after another navigation must be dropped.
+  const currentImageIdRef = useRef(imageId);
+  currentImageIdRef.current = imageId;
+
   const load = useCallback(async () => {
     const res = await fetch(`/api/images/${imageId}`);
+    if (imageId !== currentImageIdRef.current) return;
     if (!res.ok) {
       setError("Could not load this image.");
       return;
     }
     const detail = await res.json<DetailData>();
+    if (imageId !== currentImageIdRef.current) return;
     setData(detail);
     setDescriptionDraft(detail.image.description ?? "");
   }, [imageId]);
@@ -123,6 +130,18 @@ export function ImageDetail({
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reset transient UI state when switching to another image, without
+  // clearing `data`: the previous image stays visible while the next
+  // one loads, so the panel doesn't flash or re-animate.
+  useEffect(() => {
+    setEditingDescription(false);
+    setNewTagName("");
+    setPlayingVideo(null);
+    setPreviewVideoId(null);
+    setEditingVideoId(null);
+    setError(null);
+  }, [imageId]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -188,12 +207,14 @@ export function ImageDetail({
   ];
 
   async function refreshAndNotify() {
-    const res = await fetch(`/api/images/${imageId}`);
+    const id = imageId;
+    const res = await fetch(`/api/images/${id}`);
     if (!res.ok) return;
     const detail = await res.json<DetailData>();
+    onChanged(detail.image);
+    if (id !== currentImageIdRef.current) return;
     setData(detail);
     setDescriptionDraft(detail.image.description ?? "");
-    onChanged(detail.image);
   }
 
   async function saveDescription() {

@@ -83,6 +83,19 @@ export function Library() {
     detailOpenRef.current = selectedImageId !== null;
   }, [selectedImageId]);
 
+  // Warm the browser cache for the neighbours of the open image, so
+  // prev/next navigation in the detail view feels instant.
+  useEffect(() => {
+    if (!selectedImageId) return;
+    const index = images.findIndex((i) => i.id === selectedImageId);
+    for (const neighbour of [images[index - 1], images[index + 1]]) {
+      if (neighbour) {
+        const img = new Image();
+        img.src = `/api/media/${neighbour.storage_key}`;
+      }
+    }
+  }, [selectedImageId, images]);
+
   const filtersActive =
     query.trim() !== "" ||
     hasVideosFilter !== "" ||
@@ -620,7 +633,6 @@ export function Library() {
           const index = images.findIndex((i) => i.id === selectedImageId);
           return (
             <ImageDetail
-              key={selectedImageId}
               imageId={selectedImageId}
               allTags={allTags}
               onClose={() => {
