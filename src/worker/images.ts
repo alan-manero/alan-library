@@ -497,10 +497,25 @@ imagesApp.get("/media/*", async (c) => {
   // human-friendly filename instead of displaying it in the browser tab.
   if (c.req.query("download") === "1") {
     const rawName = c.req.query("name") || key.split("/").pop() || "file";
-    const safeName = rawName.replace(/[\r\n"\\]/g, "_").slice(0, 150);
+    let safeName = rawName.replace(/[\r\n"\\/]/g, "_");
+
+    // Some AI tools produce filenames longer than 150 chars (the whole prompt
+    // ends up in the name). Naively cutting the tail also cuts the ".mp4",
+    // leaving a file Windows can't open — so trim the base name and always
+    // keep the extension, borrowing it from the storage key if missing.
+    let ext = safeName.match(/\.[A-Za-z0-9]{1,8}$/)?.[0] ?? "";
+    if (!ext) ext = key.match(/\.[A-Za-z0-9]{1,8}$/)?.[0] ?? "";
+    const base = ext && safeName.endsWith(ext)
+      ? safeName.slice(0, -ext.length)
+      : safeName;
+    safeName = base.slice(0, 120 - ext.length) + ext;
+
+    // ASCII fallback in `filename`, full UTF-8 name in `filename*`
+    // (RFC 5987), so accents and emoji survive in modern browsers.
+    const asciiName = safeName.replace(/[^\x20-\x7e]/g, "_");
     headers.set(
       "content-disposition",
-      `attachment; filename="${safeName}"`
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`
     );
     headers.set("cache-control", "private, no-store");
   }
