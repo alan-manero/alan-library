@@ -207,10 +207,13 @@ export function Library({
       setLoading(false);
       // Pick up where a previous session left off: anything still waiting
       // for analysis gets queued automatically (survives page refreshes).
+      // ANALYZING images are orphans from a page closed mid-analysis — the
+      // request died with the page, so they need to be relaunched too.
       for (const img of data.images) {
         if (
           img.analysis_status === "UPLOADED" ||
-          img.analysis_status === "QUEUED"
+          img.analysis_status === "QUEUED" ||
+          img.analysis_status === "ANALYZING"
         ) {
           enqueueAnalysis(img.id);
         }
@@ -699,11 +702,9 @@ export function Library({
                 ? `Importing ${batch.progress.total} image${batch.progress.total === 1 ? "" : "s"}`
                 : "Import finished"}
             </strong>
-            {batch.status !== "ACTIVE" && (
-              <button className="ghost-button small" onClick={dismissBatch}>
-                Dismiss
-              </button>
-            )}
+            <button className="ghost-button small" onClick={dismissBatch}>
+              Dismiss
+            </button>
           </div>
 
           <ProgressRow

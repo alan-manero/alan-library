@@ -46,12 +46,15 @@ async function batchWithProgress(env: Env, id: string) {
   };
 
   // The batch is finished when nothing is still uploading and every uploaded
-  // item has reached a final analysis state.
+  // item has reached a final analysis state. Items whose image was deleted
+  // in the meantime (image_id cleared) have nothing left to analyze, so they
+  // must not keep the batch alive forever.
   const complete =
     progress.pendingUpload === 0 &&
     items.every(
       (i) =>
         i.upload_status !== "DONE" ||
+        i.image_id === null ||
         ANALYSIS_TERMINAL.includes(i.analysis_status)
     );
 
@@ -105,13 +108,16 @@ batchesApp.post("/batches", async (c) => {
 });
 
 // The most recent unfinished batch, if any (used to resume after a refresh).
+// batchWithProgress may realize the batch is actually finished and close it;
+// in that case there is nothing to resume, so don't hand it to the UI.
 batchesApp.get("/batches/active", async (c) => {
   const row = await c.env.DB.prepare(
     "SELECT id FROM import_batches WHERE status = 'ACTIVE' ORDER BY created_at DESC LIMIT 1"
   ).first<{ id: string }>();
   if (!row) return c.json({ batch: null });
   const data = await batchWithProgress(c.env, row.id);
-  return c.json(data ?? { batch: null });
+  if (!data || data.batch.status !== "ACTIVE") return c.json({ batch: null });
+  return c.json(data);
 });
 
 batchesApp.get("/batches/:id", async (c) => {
@@ -120,13 +126,19 @@ batchesApp.get("/batches/:id", async (c) => {
   return c.json(data);
 });
 
-// Give up on files that never finished uploading (e.g. page closed mid-import).
+// Give up on a batch (stuck import, page closed mid-import, or the user just
+// wants the panel gone). Pending uploads are marked failed, unfinished
+// analyses skipped, and the batch closed so it never resurfaces on login.
 batchesApp.post("/batches/:id/dismiss", async (c) => {
   const id = c.req.param("id");
   await c.env.DB.batch([
     c.env.DB.prepare(
       `UPDATE import_items SET upload_status = 'ERROR', error = 'Upload interrupted'
         WHERE batch_id = ?1 AND upload_status IN ('PENDING', 'UPLOADING')`
+    ).bind(id),
+    c.env.DB.prepare(
+      `UPDATE import_items SET analysis_status = 'SKIPPED'
+        WHERE batch_id = ?1 AND analysis_status NOT IN ('DONE', 'ERROR')`
     ).bind(id),
     c.env.DB.prepare(
       "UPDATE import_batches SET status = 'DONE' WHERE id = ?1"

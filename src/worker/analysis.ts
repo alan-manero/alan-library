@@ -325,7 +325,14 @@ analysisApp.post("/images/:id/analyze", async (c) => {
   if (!image) return c.json({ error: "Image not found." }, 404);
 
   // Cost guard (spec 42): never silently reanalyze an image that is done.
+  // Still sync the batch item, in case a previous run finished the analysis
+  // but died before recording it there (keeps import batches from hanging).
   if (image.analysis_status === "READY" && !force) {
+    await c.env.DB.prepare(
+      "UPDATE import_items SET analysis_status = 'DONE', error = NULL WHERE image_id = ?1"
+    )
+      .bind(id)
+      .run();
     return c.json({ image: await getFullImage(c.env, id) });
   }
 
